@@ -1,0 +1,25 @@
+[package]
+name = "mathcore-units"
+version = "0.1.0"
+description = "Unit and dimension algebra for the mathcore/thales ecosystem: SI base dimensions, unit types, conversion, and serde-capable wire format"
+readme = "README.md"
+repository = "https://github.com/ChrisGVE/mathcore-units"
+documentation = "https://docs.rs/mathcore-units"
+homepage = "https://github.com/ChrisGVE/mathcore-units"
+keywords = ["units", "dimension", "si", "physics", "measurement"]
+categories = ["mathematics", "science", "no-std"]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde"]
+
+[dev-dependencies]
+serde_json = { workspace = true }
