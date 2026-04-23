@@ -269,15 +269,29 @@ pub enum Conversion {
     Linear { scale: Rational },
     /// Affine: x_si = scale · x_unit + offset   (e.g. Celsius, Fahrenheit)
     Affine { scale: Rational, offset: Rational },
-    /// Logarithmic: x_si = reference · base^(x_unit / factor)
-    /// (e.g. dBm: x_W = 0.001 · 10^(x_dBm / 10))
+    /// Logarithmic:
+    ///     x_si = reference_unit_value · reference_scale · base^(x_unit / factor)
+    /// where `reference_unit_value` is the canonical-SI value of the
+    /// referenced unit (1.0 when reference is None, meaning dimensionless),
+    /// `reference_scale` scales the reference (1 for dBW, 10⁻³ for dBm,
+    /// 2×10⁻⁵ for dB SPL), and `factor` is 10 for power-dB or 20 for
+    /// amplitude-dB.
     Logarithmic {
-        reference: UnitId,   // the referenced base unit
-        base: u32,           // log base (usually 10 or e)
-        factor: i32,         // divisor in exponent (10 for power dB, 20 for amplitude dB)
+        reference: Option<UnitId>,  // None = dimensionless (plain dB, Neper)
+        reference_scale: Rational,  // factor on the reference (1 for dBW, 1e-3 for dBm, 2e-5 for dB SPL)
+        base: LogBase,              // base of the logarithm (Ten / E / Two)
+        factor: i32,                // 10 for power-dB, 20 for amplitude-dB
     },
     /// Scale equals a constant's value (e.g. solar_mass = M_sun kg)
     FromConstant { id: ConstantId },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum LogBase {
+    Ten,    // base 10 (all dB variants)
+    E,      // base e (Neper)
+    Two,    // base 2 (audio / bit-ratio contexts, reserved)
 }
 ```
 
@@ -493,6 +507,26 @@ pub enum ConstantId {
 `ConstantId` lives in mathcore-units so mathcore-units's catalog can
 reference constants in `Conversion::FromConstant`. The actual values
 (with units, uncertainties, citations) live in mathcore-constants.
+
+**ConstantSpec unit-field contract:** mathcore-constants's
+`ConstantSpec` will carry its unit as a `UnitExpression` (from § 2.8),
+NOT a single `UnitId`. This is required because many constants have
+compound units (`G` is m³·kg⁻¹·s⁻², `k_B` is J·K⁻¹, `N_A` is mol⁻¹,
+`σ` is W·m⁻²·K⁻⁴). A single `UnitId` cannot express these. The
+mathcore-constants spec embeds the UnitExpression type from here
+without introducing a parallel type.
+
+**Astronomy units in both enums:** `AstronomicalUnit`, `LightYear`,
+`Parsec` appear in both the `UnitId` enum (as scaled-meter length
+units) and the `ConstantId` enum (as named physical quantities). This
+is intentional, not redundant:
+- As `UnitId`: user writes `5 ly` meaning five lightyears of length
+- As `ConstantId`: user writes `c · t / lightyear` where `lightyear`
+  is a named physical distance constant in a main expression
+The two use cases are disjoint (unit context vs. main-expression
+context), and both are legitimate. The UnitId-side conversion is
+`Linear { scale }` with the exact IAU value baked in; the
+ConstantId-side carries the same value with citation metadata.
 This split keeps mathcore-units pure-data (no physical numbers) and
 mathcore-constants free to evolve its value schema independently.
 
@@ -659,11 +693,16 @@ unit — NOT in catalog. Use `PartsPerX` or a fraction for purity.
 
 | UnitId | Symbol | Conversion |
 |---|---|---|
-| Decibel | dB | Logarithmic { reference: Dimensionless, base: 10, factor: 10 } — plain ratio |
-| DecibelMilliwatt | dBm | Logarithmic { reference: Watt, base: 10, factor: 10 } with unit-scale offset for milli |
-| DecibelWatt | dBW | Logarithmic { reference: Watt, base: 10, factor: 10 } |
-| DecibelSpl | dB SPL | Logarithmic { reference: Pascal, base: 10, factor: 20 } with offset for 20 μPa reference |
-| Neper | Np | Logarithmic { reference: Dimensionless, base: e, factor: 1 } |
+| Decibel | dB | Logarithmic { reference: None, reference_scale: 1, base: Ten, factor: 10 } — plain power ratio |
+| DecibelMilliwatt | dBm | Logarithmic { reference: Some(Watt), reference_scale: 10⁻³, base: Ten, factor: 10 } |
+| DecibelWatt | dBW | Logarithmic { reference: Some(Watt), reference_scale: 1, base: Ten, factor: 10 } |
+| DecibelSpl | dB SPL | Logarithmic { reference: Some(Pascal), reference_scale: 2×10⁻⁵, base: Ten, factor: 20 } |
+| Neper | Np | Logarithmic { reference: None, reference_scale: 1, base: E, factor: 1 } |
+
+The `reference_scale` encodes the per-variant reference level directly,
+eliminating the earlier "offset for milli/μPa" prose workaround. For dB
+variants with no physical reference (plain dB, Np), `reference` is
+`None` and `reference_scale` is 1.
 
 **Note on dB amplitude vs. power:** power dB uses factor 10 (`10 log10(P/P_ref)`);
 amplitude dB uses factor 20 (`20 log10(A/A_ref) = 10 log10(A²/A_ref²)`).
@@ -747,6 +786,10 @@ pub fn lookup_with_prefix(s: &str) -> Option<(Option<SiPrefix>, UnitId)>;
 | LightYear | ly, lyr, light-year, lightyear, lt-yr |
 | Parsec | pc |
 | AstronomicalUnit | AU, au |
+| Year | yr, year, years (no single-letter alias — `y` is Yocto prefix) |
+| Minute | min, minutes |
+| Hour | hr, hour, hours (bare `h` = Hour standalone; Hecto needs a companion atom) |
+| Day | day, days (bare `d` = Day standalone; Deci needs a companion atom) |
 | SolarMass | M_sun, M_⊙, M_☉, Msun |
 | ElectronMass | m_e, me |
 | Hour | hr, hour, hours |
