@@ -203,7 +203,14 @@ pub enum UnitId {
     FootPound, BritishThermalUnit, Horsepower,
 
     // --- Radiation (specialty) ---
-    Curie, Roentgen, Rad, Rem,         // non-SI radiation units
+    Curie,                              // activity (obsolete Bq variant, still in historical data)
+    Roentgen,                           // exposure (X-ray / gamma in air)
+    // Rad (absorbed dose) and Rem (dose equivalent) dropped — obsolete;
+    // Gray (Gy) and Sievert (Sv) cover the same quantities, and `rad`
+    // alias would collide with Radian.
+
+    // --- Mass (commercial / specialty) ---
+    Carat,                              // 200 mg exactly (metric carat, ISO)
 
     // --- Logarithmic family ---
     Decibel,                            // dimensionless ratio (10 log10)
@@ -388,6 +395,41 @@ impl SiPrefix {
     pub const fn is_power_of_3(self) -> bool { /* true except Centi/Deci/Deca/Hecto */ }
 }
 ```
+
+**Prefix symbols (strict, case-sensitive):**
+
+| Prefix | Symbol | Exponent |
+|---|---|---|
+| Quecto | `q` | 10⁻³⁰ |
+| Ronto | `r` | 10⁻²⁷ |
+| Yocto | `y` | 10⁻²⁴ |
+| Zepto | `z` | 10⁻²¹ |
+| Atto | `a` | 10⁻¹⁸ |
+| Femto | `f` | 10⁻¹⁵ |
+| Pico | `p` | 10⁻¹² |
+| Nano | `n` | 10⁻⁹ |
+| Micro | `μ` (U+03BC) or `µ` (U+00B5) | 10⁻⁶ |
+| Milli | `m` | 10⁻³ |
+| Centi | `c` | 10⁻² |
+| Deci | `d` | 10⁻¹ |
+| Deca | `da` | 10¹ |
+| Hecto | `h` | 10² |
+| Kilo | `k` | 10³ |
+| Mega | `M` | 10⁶ |
+| Giga | `G` | 10⁹ |
+| Tera | `T` | 10¹² |
+| Peta | `P` | 10¹⁵ |
+| Exa | `E` | 10¹⁸ |
+| Zetta | `Z` | 10²¹ |
+| Yotta | `Y` | 10²⁴ |
+| Ronna | `R` | 10²⁷ |
+| Quetta | `Q` | 10³⁰ |
+
+**Important: ASCII `u` is NOT accepted as Micro.** The AtomicMassUnit
+(`u`) claims this letter as its canonical alias. Micro must be written
+as `μ` (Greek letter) or `µ` (Unicode MICRO SIGN, U+00B5) — both
+canonical. Fall-back plain-text input: spell out `micro` or use the
+composite unit name directly (`micrometer` matches via alias lookup).
 
 Binary prefixes (Kibi/Mebi/…) are NOT included. Removed with infotech
 per session 14.
@@ -589,10 +631,29 @@ differ — UK variant is the default UnitId, US variant is explicit.
 | BritishThermalUnit | BTU | Energy | 1055.05585 (IT definition; catalog note lists variants) |
 | Horsepower | hp | Power | 745.6998715822702 (mechanical HP; metric HP differs, not in catalog) |
 
+**Strict alias enforcement — mass units:**
+- `gr` → **Grain** only. Never accepted as Gram abbreviation.
+- `g` → **Gram** only (§ 5.4 legacy entry).
+- Users wanting Gram must use `g`; `gr` is imperial grain.
+- Catalog's alias table enforces this via audit.
+
 **Alias convention for US volume variants:** the US-specific UnitIds
 accept aliases like `usgal`, `gal_us`, `us_gallon`, `gallon_us`. The
 bare `gal` alias resolves to UK Gallon (the default). Callers targeting
 US context must explicitly say `gal_us`.
+
+### 5.5a Mass (commercial / specialty)
+
+| UnitId | Symbol | Dimension | Conversion |
+|---|---|---|---|
+| Carat | ct | Mass | Linear { scale: 2e-4 } (exact, 200 mg per ISO metric carat) |
+
+Alias `ct` — no collision: `c` (Centi) + `t` (Tonne) decomposition
+would yield centi-tonne (10 kg), never encountered in practice;
+direct-alias precedence resolves unambiguously to Carat.
+
+Karat (as in gold purity, e.g., 18-karat gold) is a ratio, not a mass
+unit — NOT in catalog. Use `PartsPerX` or a fraction for purity.
 
 ### 5.6 Logarithmic units
 
@@ -682,7 +743,7 @@ pub fn lookup_with_prefix(s: &str) -> Option<(Option<SiPrefix>, UnitId)>;
 | Celsius (Degree) | degC, celcius |
 | Fahrenheit | degF |
 | Ohm | ohm, Ω (Unicode) |
-| Micro (prefix) | µ (U+00B5), μ (U+03BC), u (plaintext) |
+| Micro (prefix) | µ (U+00B5), μ (U+03BC) — NOT `u`; `u` is AtomicMassUnit |
 | LightYear | ly, lyr, light-year, lightyear, lt-yr |
 | Parsec | pc |
 | AstronomicalUnit | AU, au |
@@ -693,7 +754,7 @@ pub fn lookup_with_prefix(s: &str) -> Option<(Option<SiPrefix>, UnitId)>;
 | Minute | min, minutes |
 | Percent | % |
 | PerMille | ‰, permille |
-| AtomicMassUnit | u (only inside annotation context), Da, dalton |
+| AtomicMassUnit | u, Da, dalton — `u` is the canonical AMU alias; Micro prefix must use `μ`/`µ` |
 
 ### 6.3 Collision audit rules
 
@@ -738,6 +799,14 @@ audit confirms no ambiguity exists. The audit tests (run in CI):
 | `cm` | (Centi, Meter) | Prefix decomp; Centimeter is NOT its own UnitId (dropped with CGS system simplification) |
 | `c` | (Centi, ???) invalid alone; reserved as constant in main-expr context | Prefixes never standalone. `c` = speed-of-light in main expression; `c` bare in unit annotation is an error. |
 | `e` | Reserved as electron-charge constant (main-expr); not a unit symbol | The letter is not a unit. Eulerian `e` lives in constants namespace, referenced as needed. |
+| `rad` | Radian (unit) | Radiation absorbed-dose `rad` dropped from catalog to prevent collision; Gray (Gy) replaces it |
+| `rem` | (undefined, reject) | Rem dropped from catalog (obsolete, Sievert replaces); token rejected in unit context |
+| `u` | AtomicMassUnit | Direct alias for AMU. Micro prefix requires `μ` (U+03BC) or `µ` (U+00B5); ASCII `u` never resolves to Micro |
+| `P` | Poise | Bare atom; Peta prefix needs companion |
+| `R` | Roentgen | Bare atom; Ronna prefix needs companion (10²⁷ scale absurd in practice) |
+| `ct` | Carat | Direct alias; centi-tonne decomp absurd (10 kg scale never encountered) |
+| `gr` | Grain (imperial) | Direct alias; NEVER resolves to Gram |
+| `g` | Gram | Bare atom; prefix target for sub-kg masses |
 
 ### 6.4 Prefix admissibility per unit
 
@@ -884,6 +953,17 @@ Decisions confirmed during spec review (2026-04-22):
    absorbed. Natural's only practical-use unit (eV) is an SI-derived
    energy entry. Planck units are deferred to a future catalog
    addition, not v0.1.0 scope.
+9. **Rad (radiation absorbed dose) dropped.** Alias `rad` collides with
+   Radian. Gray (Gy, SI) covers the same quantity. Obsolete.
+10. **Rem dropped.** Sievert (Sv, SI) replaces. Obsolete.
+11. **Micro prefix requires `μ` or `µ`.** ASCII `u` is AtomicMassUnit
+    (AMU) only. Plain-text Micro input uses `μ`/`µ` directly, or the
+    user spells the composite unit (e.g., `micrometer`).
+12. **`gr` = Grain (imperial) only.** Never accepted as Gram
+    abbreviation. Gram is `g`.
+13. **Carat added.** Metric carat (ISO), 200 mg exactly, alias `ct`.
+    No collision — centi-tonne decomposition absurd in practice.
 
-All v0.1.0 design questions resolved. Ready for catalog freeze
-(enumerate all aliases + run collision audit) and implementation.
+All v0.1.0 design questions resolved. Catalog freeze requires the
+exhaustive alias-and-prefix collision audit (CI-enforced, per MU-9).
+Ready for implementation.
